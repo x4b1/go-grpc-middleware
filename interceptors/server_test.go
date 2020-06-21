@@ -27,7 +27,7 @@ type mockServerReportable struct {
 }
 
 func (m *mockServerReportable) ServerReporter(ctx context.Context, _ interface{}, typ GRPCType, serviceName string, methodName string) (Reporter, context.Context) {
-	mock := &mockedReporter{m: &m.m, typ: typ, svcName: serviceName, methodName: methodName}
+	mock := &mockedReporter{typ: typ, svcName: serviceName, methodName: methodName}
 	m.m.Lock()
 	defer m.m.Unlock()
 
@@ -106,7 +106,6 @@ func (s *ServerInterceptorTestSuite) TestUnaryReporting() {
 	_, err := s.testClient.PingEmpty(s.ctx, &testpb.Empty{}) // should return with code=OK
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), []*mockedReporter{{
-		m:               &sync.Mutex{},
 		typ:             Unary,
 		svcName:         testpb.TestServiceFullName,
 		methodName:      "PingEmpty",
@@ -119,7 +118,6 @@ func (s *ServerInterceptorTestSuite) TestUnaryReporting() {
 	_, err = s.testClient.PingError(s.ctx, &testpb.PingRequest{ErrorCodeReturned: uint32(codes.FailedPrecondition)}) // should return with code=FailedPrecondition
 	require.Error(s.T(), err)
 	require.Equal(s.T(), []*mockedReporter{{
-		m:               &sync.Mutex{},
 		typ:             Unary,
 		svcName:         testpb.TestServiceFullName,
 		methodName:      "PingError",
@@ -143,7 +141,6 @@ func (s *ServerInterceptorTestSuite) TestStreamingReports() {
 	}
 	require.EqualValues(s.T(), grpctesting.ListResponseCount, count, "Number of received msg on the wire must match")
 	require.Equal(s.T(), []*mockedReporter{{
-		m:               &sync.Mutex{},
 		typ:             ServerStream,
 		svcName:         testpb.TestServiceFullName,
 		methodName:      "PingList",
@@ -181,7 +178,6 @@ func (m *mockServerReportable) requireOneReportWithRetry(ctx context.Context, t 
 		defer m.m.Unlock()
 		break
 	}
-	expected.m = &m.m
 	// Even without reading, we should get initial report.
 	require.Equal(t, []*mockedReporter{expected}, m.reports)
 }
@@ -222,7 +218,6 @@ func (s *ServerInterceptorTestSuite) TestBiStreamingReporting() {
 	require.EqualValues(s.T(), count, 100, "Number of received msg on the wire must match")
 
 	require.Equal(s.T(), []*mockedReporter{{
-		m:               &sync.Mutex{},
 		typ:             BidiStream,
 		svcName:         testpb.TestServiceFullName,
 		methodName:      "PingStream",

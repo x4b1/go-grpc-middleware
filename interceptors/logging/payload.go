@@ -1,23 +1,18 @@
 package logging
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"time"
 
-	"github.com/golang/protobuf/jsonpb"
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/grpctesting/testpb"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/tags"
-)
-
-var (
-	// JsonPbMarshaller is the marshaller used for serializing protobuf messages.
-	// If needed, this variable can be reassigned with a different marshaller with the same Marshal() signature.
-	JsonPbMarshaller JsonPbMarshaler = &jsonpb.Marshaler{}
 )
 
 type serverPayloadReporter struct {
@@ -31,18 +26,30 @@ func (c *serverPayloadReporter) PostMsgSend(req interface{}, err error, duration
 	if err != nil {
 		return
 	}
+
+	p, ok := req.(proto.Message)
+	if !ok {
+		// TODO(bwplotka): Panic / log err?
+		return
+	}
 	logger := c.logger.With(extractFields(tags.Extract(c.ctx))...)
 	// For server send message is the response.
-	logProtoMessageAsJson(logger.With("grpc.send.duration", duration.String()), req, "grpc.response.content", "response payload logged as grpc.response.content field")
+	logProtoMessageAsJson(logger.With("grpc.send.duration", duration.String()), p, "grpc.response.content", "response payload logged as grpc.response.content field")
 }
 
 func (c *serverPayloadReporter) PostMsgReceive(reply interface{}, err error, duration time.Duration) {
 	if err != nil {
 		return
 	}
+
+	p, ok := reply.(proto.Message)
+	if !ok {
+		// TODO(bwplotka): Panic / log err?
+		return
+	}
 	logger := c.logger.With(extractFields(tags.Extract(c.ctx))...)
 	// For server recv message is the request.
-	logProtoMessageAsJson(logger.With("grpc.recv.duration", duration.String()), reply, "grpc.request.content", "request payload logged as grpc.request.content field")
+	logProtoMessageAsJson(logger.With("grpc.recv.duration", duration.String()), p, "grpc.request.content", "request payload logged as grpc.request.content field")
 }
 
 type clientPayloadReporter struct {
@@ -56,16 +63,28 @@ func (c *clientPayloadReporter) PostMsgSend(req interface{}, err error, duration
 	if err != nil {
 		return
 	}
+
+	p, ok := req.(proto.Message)
+	if !ok {
+		// TODO(bwplotka): Panic / log err?
+		return
+	}
 	logger := c.logger.With(extractFields(tags.Extract(c.ctx))...)
-	logProtoMessageAsJson(logger.With("grpc.send.duration", duration.String()), req, "grpc.request.content", "request payload logged as grpc.request.content field")
+	logProtoMessageAsJson(logger.With("grpc.send.duration", duration.String()), p, "grpc.request.content", "request payload logged as grpc.request.content field")
 }
 
 func (c *clientPayloadReporter) PostMsgReceive(reply interface{}, err error, duration time.Duration) {
 	if err != nil {
 		return
 	}
+
+	p, ok := reply.(proto.Message)
+	if !ok {
+		// TODO(bwplotka): Panic / log err?
+		return
+	}
 	logger := c.logger.With(extractFields(tags.Extract(c.ctx))...)
-	logProtoMessageAsJson(logger.With("grpc.recv.duration", duration.String()), reply, "grpc.response.content", "response payload logged as grpc.response.content field")
+	logProtoMessageAsJson(logger.With("grpc.recv.duration", duration.String()), p, "grpc.response.content", "response payload logged as grpc.response.content field")
 }
 
 type payloadReportable struct {
@@ -127,26 +146,35 @@ func PayloadStreamClientInterceptor(logger Logger, decider ClientPayloadLoggingD
 	return interceptors.StreamClientInterceptor(&payloadReportable{logger: logger, clientDecider: decider})
 }
 
-func logProtoMessageAsJson(logger Logger, pbMsg interface{}, key string, msg string) {
-	if p, ok := pbMsg.(proto.Message); ok {
-		payload, err := (&jsonpbObjectMarshaler{pb: p}).marshalJSON()
-		if err != nil {
-			logger = logger.With(key, err.Error())
-		} else {
-			logger = logger.With(key, string(payload))
-		}
-		logger.Log(INFO, msg)
-	}
-}
+/*
+=== RUN   TestPayloadSuite/TestPingError_LogsOnlyRequestsOnError
+value:"something"  error_code_returned:4
+{"value":"something", "errorCodeReturned":4} <nil>
+value:"something"  error_code_returned:4
+{"value":"something", "errorCodeReturned":4} <nil>
+{"value":"something", "errorCodeReturned":4}
+{"value":"something", "errorCodeReturned":4}
+{"value":"something", "errorCodeReturned":4}
 
-type jsonpbObjectMarshaler struct {
-	pb proto.Message
-}
+vS
 
-func (j *jsonpbObjectMarshaler) marshalJSON() ([]byte, error) {
-	b := &bytes.Buffer{}
-	if err := JsonPbMarshaller.Marshal(b, j.pb); err != nil {
-		return nil, fmt.Errorf("jsonpb serializer failed: %v", err)
+=== RUN   TestPayloadSuite/TestPingError_LogsOnlyRequestsOnError
+value:"something" error_code_returned:4
+{"value":"something","errorCodeReturned":4} <nil>
+value:"something" error_code_returned:4
+{"value":"something","errorCodeReturned":4} <nil>
+
+*/
+func logProtoMessageAsJson(logger Logger, pbMsg proto.Message, key string, msg string) {
+	if x, ok := pbMsg.(*testpb.PingRequest); ok {
+		fmt.Println(x.String())
 	}
-	return b.Bytes(), nil
+	payload, err := protojson.Marshal(pbMsg)
+	fmt.Println(string(payload), err)
+	if err != nil {
+		logger = logger.With(key, err.Error())
+	} else {
+		logger = logger.With(key, string(payload))
+	}
+	logger.Log(INFO, msg)
 }
